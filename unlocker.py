@@ -41,6 +41,7 @@ Offset  Length  Struct Type Description
 0x18/24 0x30/48 48B    byte Data
 """
 
+
 from __future__ import print_function
 import codecs
 import os
@@ -52,10 +53,7 @@ if sys.version_info < (2, 7):
     sys.stderr.write('You need Python 2.7 or later\n')
     sys.exit(1)
 
-# Setup imports depending on whether IronPython or CPython
-if sys.platform == 'win32' \
-        or sys.platform == 'cli':
-    # noinspection PyUnresolvedReferences
+if sys.platform in ['win32', 'cli']:
     if sys.version_info > (3, 0):
         from winreg import *
     else:
@@ -106,12 +104,12 @@ E_SHT_RELA = 4
 def patchelf(f, oldoffset, newoffset):
     f.seek(0)
     magic = f.read(4)
-    if not magic == b'\x7fELF':
+    if magic != b'\x7fELF':
         raise Exception('Magic number does not match')
 
     ei_class = struct.unpack('=B', f.read(1))[0]
     if ei_class != E_CLASS64:
-        raise Exception('Not 64bit elf header: ' + ei_class)
+        raise Exception(f'Not 64bit elf header: {ei_class}')
 
     f.seek(40)
     e_shoff = struct.unpack('=Q', f.read(8))[0]
@@ -128,23 +126,23 @@ def patchelf(f, oldoffset, newoffset):
         e_sh = struct.unpack('=LLQQQQLLQQ', f.read(e_shentsize))
         # e_sh_name = e_sh[0]
         e_sh_type = e_sh[1]
-        e_sh_offset = e_sh[4]
-        e_sh_size = e_sh[5]
-        e_sh_entsize = e_sh[9]
         if e_sh_type == E_SHT_RELA:
+            e_sh_size = e_sh[5]
+            e_sh_entsize = e_sh[9]
             e_sh_nument = int(e_sh_size / e_sh_entsize)
+            e_sh_offset = e_sh[4]
             # print 'RELA at 0x{:x} with {:d} entries'.format(e_sh_offset, e_sh_nument)
             for j in range(0, e_sh_nument):
                 f.seek(e_sh_offset + e_sh_entsize * j)
                 rela = struct.unpack('=QQq', f.read(e_sh_entsize))
-                r_offset = rela[0]
-                r_info = rela[1]
                 r_addend = rela[2]
                 if r_addend == oldoffset:
                     r_addend = newoffset
                     f.seek(e_sh_offset + e_sh_entsize * j)
+                    r_offset = rela[0]
+                    r_info = rela[1]
                     f.write(struct.pack('=QQq', r_offset, r_info, r_addend))
-                    print('Relocation modified at: ' + hex(e_sh_offset + e_sh_entsize * j))
+                    print(f'Relocation modified at: {hex(e_sh_offset + e_sh_entsize * j)}')
 
 
 def patchkeys(f, key):
@@ -219,9 +217,6 @@ def patchkeys(f, key):
             # Finished so get out of loop
             break
 
-        else:
-            pass
-
         i += 1
     return smc_old_memptr, smc_new_memptr
 
@@ -235,7 +230,7 @@ def patchsmc(name, sharedobj):
         # Read file into string variable
         vmx = f.read()
 
-        print('File: ' + name + '\n')
+        print(f'File: {name}' + '\n')
 
         # Setup hex string for vSMC headers
         # These are the private and public key counts
@@ -261,30 +256,30 @@ def patchsmc(name, sharedobj):
 
         # Print vSMC0 tables and keys
         print('appleSMCTableV0 (smc.version = "0")')
-        print('appleSMCTableV0 Address      : ' + hex(smc_header_v0_offset))
+        print(f'appleSMCTableV0 Address      : {hex(smc_header_v0_offset)}')
         print('appleSMCTableV0 Private Key #: 0xF2/242')
         print('appleSMCTableV0 Public Key  #: 0xF0/240')
 
         if (smc_adr - smc_key0) != 72:
-            print('appleSMCTableV0 Table        : ' + hex(smc_key0))
+            print(f'appleSMCTableV0 Table        : {hex(smc_key0)}')
             smc_old_memptr, smc_new_memptr = patchkeys(f, smc_key0)
         elif (smc_adr - smc_key1) != 72:
-            print('appleSMCTableV0 Table        : ' + hex(smc_key1))
+            print(f'appleSMCTableV0 Table        : {hex(smc_key1)}')
             smc_old_memptr, smc_new_memptr = patchkeys(f, smc_key1)
 
         print()
 
         # Print vSMC1 tables and keys
         print('appleSMCTableV1 (smc.version = "1")')
-        print('appleSMCTableV1 Address      : ' + hex(smc_header_v1_offset))
+        print(f'appleSMCTableV1 Address      : {hex(smc_header_v1_offset)}')
         print('appleSMCTableV1 Private Key #: 0x01B4/436')
         print('appleSMCTableV1 Public Key  #: 0x01B0/432')
 
         if (smc_adr - smc_key0) == 72:
-            print('appleSMCTableV1 Table        : ' + hex(smc_key0))
+            print(f'appleSMCTableV1 Table        : {hex(smc_key0)}')
             smc_old_memptr, smc_new_memptr = patchkeys(f, smc_key0)
         elif (smc_adr - smc_key1) == 72:
-            print('appleSMCTableV1 Table        : ' + hex(smc_key1))
+            print(f'appleSMCTableV1 Table        : {hex(smc_key1)}')
             smc_old_memptr, smc_new_memptr = patchkeys(f, smc_key1)
 
         print()
@@ -292,7 +287,9 @@ def patchsmc(name, sharedobj):
         # Find matching RELA record in .rela.dyn in ESXi ELF files
         # This is temporary code until proper ELF parsing written
         if sharedobj:
-            print('Modifying RELA records from: ' + hex(smc_old_memptr) + ' to ' + hex(smc_new_memptr))
+            print(
+                f'Modifying RELA records from: {hex(smc_old_memptr)} to {hex(smc_new_memptr)}'
+            )
             patchelf(f, smc_old_memptr, smc_new_memptr)
 
         # Tidy up
@@ -302,62 +299,54 @@ def patchsmc(name, sharedobj):
 
 def patchbase(name):
     # Patch file
-    print('GOS Patching: ' + name)
-    f = open(name, 'r+b')
+    print(f'GOS Patching: {name}')
+    with open(name, 'r+b') as f:
+        # Entry to search for in GOS table
+        # Should work for Workstation 12-15...
+        darwin = re.compile(
+                 b'\x10\x00\x00\x00[\x10|\x20]\x00\x00\x00[\x01|\x02]\x00\x00\x00\x00\x00\x00\x00'
+                 b'\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00')
 
-    # Entry to search for in GOS table
-    # Should work for Workstation 12-15...
-    darwin = re.compile(
-             b'\x10\x00\x00\x00[\x10|\x20]\x00\x00\x00[\x01|\x02]\x00\x00\x00\x00\x00\x00\x00'
-             b'\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00')
+        # Read file into string variable
+        base = f.read()
 
-    # Read file into string variable
-    base = f.read()
-
-    # Loop through each entry and set top bit
-    # 0xBE --> 0xBF (WKS 12)
-    # 0x3E --> 0x3F (WKS 14)
-    for m in darwin.finditer(base):
-        offset = m.start()
-        f.seek(offset + 32)
-        flag = ord(f.read(1))
-        flag = set_bit(flag, 0)
+            # Loop through each entry and set top bit
+            # 0xBE --> 0xBF (WKS 12)
+            # 0x3E --> 0x3F (WKS 14)
+        for m in darwin.finditer(base):
+            offset = m.start()
+            f.seek(offset + 32)
+            flag = ord(f.read(1))
+            flag = set_bit(flag, 0)
 #        flag = chr(flag)
-        f.seek(offset + 32)
-        f.write(bytes([flag]))
-        print('GOS Patched flag @: ' + hex(offset))
+            f.seek(offset + 32)
+            f.write(bytes([flag]))
+            print(f'GOS Patched flag @: {hex(offset)}')
 
-    # Tidy up
-    f.flush()
-    f.close()
-    print('GOS Patched: ' + name)
+        # Tidy up
+        f.flush()
+    print(f'GOS Patched: {name}')
 
 
 def patchvmkctl(name):
     # Patch file
-    print('smcPresent Patching: ' + name)
-    f = open(name, 'r+b')
+    print(f'smcPresent Patching: {name}')
+    with open(name, 'r+b') as f:
+        # Read file into string variable
+        vmkctl = f.read()
+        applesmc = vmkctl.find(b'applesmc')
+        f.seek(applesmc)
+        f.write(b'vmkernel')
 
-    # Read file into string variable
-    vmkctl = f.read()
-    applesmc = vmkctl.find(b'applesmc')
-    f.seek(applesmc)
-    f.write(b'vmkernel')
-
-    # Tidy up
-    f.flush()
-    f.close()
-    print('smcPresent Patched: ' + name)
+        # Tidy up
+        f.flush()
+    print(f'smcPresent Patched: {name}')
 
 
 # noinspection PyUnresolvedReferences
 def main():
     # Work around absent Platform module on VMkernel
-    if os.name == 'nt' or os.name == 'cli':
-        osname = 'windows'
-    else:
-        osname = os.uname()[0].lower()
-
+    osname = 'windows' if os.name in {'nt', 'cli'} else os.uname()[0].lower()
     # vmwarebase = ''
     vmx_so = False
 
@@ -384,7 +373,7 @@ def main():
         vmwarebase = joinpath(vmwarebase_path, 'vmwarebase.dll')
 
     else:
-        print('Unknown Operating System: ' + osname)
+        print(f'Unknown Operating System: {osname}')
         return
 
     # Patch the vmx executables skipping stats version for Player
